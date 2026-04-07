@@ -42,7 +42,7 @@ The training loop implements the **Backpropagation** algorithm:
 * **Loss Calculation:** Uses the **Squared-Error** function as the objective to minimize.
 * **Backward Pass:** Computes gradients using the chain rule.
 * **Weight Updates:** Adjusts weights and biases based on the specified **Learning Rate** ($\alpha$).
-![Hidden Nodes Accuracy](<img width="1389" height="490" alt="Accuracy and loss plot" src="https://github.com/user-attachments/assets/12cb2b38-5c8e-4e16-a045-48a704d8f58a" />)
+![Accuracy and loss plot](https://github.com/user-attachments/assets/12cb2b38-5c8e-4e16-a045-48a704d8f58a)
 
 ### 4. Advanced Evaluation
 The code doesn't just train once; it performs:
