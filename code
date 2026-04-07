@@ -1,0 +1,213 @@
+# 1. Imports & Setup
+import numpy as np
+import pandas as pd
+import io
+import matplotlib.pyplot as plt
+from google.colab import files
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
+# 2. Data Loading & Preprocessing
+print("Upload 'wdbc.data' to proceed:")
+file_packet = files.upload()
+name_of_file = list(file_packet.keys())[0]
+
+def get_clean_data(raw_bytes):
+    # Load data
+    raw_df = pd.read_csv(io.BytesIO(raw_bytes), header=None)
+
+    # Encode labels (M=1, B=0)
+    target_labels = raw_df.iloc[:, 1].apply(lambda x: 1 if x == 'M' else 0).values.reshape(-1, 1)
+
+    # Extract features and apply standardization
+    features_data = raw_df.iloc[:, 2:].values
+    sc = StandardScaler()
+    scaled_features = sc.fit_transform(features_data)
+
+    return scaled_features, target_labels
+
+# Process data
+X, y = get_clean_data(file_packet[name_of_file])
+
+# Train-test split (80/20)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+print(f"Training set size: {len(X_train)} | Testing set size: {len(X_test)}")
+
+# 3. MLP Core Functions
+def activation_sig(v):
+    return 1.0 / (1.0 + np.exp(-v))
+
+def derivative_sig(out):
+    return out * (1.0 - out)
+
+def compute_loss(real, pred):
+    # Mean Squared Error
+    return np.mean(np.square(real - pred) / 2.0)
+
+def create_weights(in_dim, h_dim, out_dim):
+    np.random.seed(42)
+    w_h = np.random.randn(in_dim, h_dim) * 0.01
+    b_h = np.zeros((1, h_dim))
+    w_o = np.random.randn(h_dim, out_dim) * 0.01
+    b_o = np.zeros((1, out_dim))
+    return w_h, b_h, w_o, b_o
+
+def mlp_forward(inputs, w_h, b_h, w_o, b_o):
+    net_h = inputs.dot(w_h) + b_h
+    out_h = activation_sig(net_h)
+    net_o = out_h.dot(w_o) + b_o
+    out_o = activation_sig(net_o)
+    return out_h, out_o
+
+def mlp_backward(inputs, real_y, out_h, out_o, w_o):
+    # Output layer gradients
+    err_o = (out_o - real_y) * derivative_sig(out_o)
+    grad_wo = out_h.T.dot(err_o)
+    grad_bo = np.sum(err_o, axis=0, keepdims=True)
+
+    # Hidden layer gradients
+    err_h = err_o.dot(w_o.T) * derivative_sig(out_h)
+    grad_wh = inputs.T.dot(err_h)
+    grad_bh = np.sum(err_h, axis=0, keepdims=True)
+
+    return grad_wh, grad_bh, grad_wo, grad_bo
+
+# 4. Main Training Loop
+# Hyperparameters
+hidden_size = 15
+alpha = 0.1
+epochs = 100
+
+# Initialize weights and metrics lists
+w_h, b_h, w_o, b_o = create_weights(X_train.shape[1], hidden_size, 1)
+train_losses, test_losses, train_accs, test_accs = [], [], [], []
+
+print("\nStarting the training process...")
+for i in range(epochs):
+    # Forward pass
+    layer1_out, final_pred = mlp_forward(X_train, w_h, b_h, w_o, b_o)
+    _, test_out = mlp_forward(X_test, w_h, b_h, w_o, b_o)
+
+    # Track losses
+    train_losses.append(compute_loss(y_train, final_pred))
+    test_losses.append(compute_loss(y_test, test_out))
+
+    # Track accuracies
+    train_accs.append(np.mean((final_pred > 0.5).astype(int) == y_train))
+    test_accs.append(np.mean((test_out > 0.5).astype(int) == y_test))
+
+    # Backward pass & update weights
+    g_wh, g_bh, g_wo, g_bo = mlp_backward(X_train, y_train, layer1_out, final_pred, w_o)
+    w_h -= alpha * g_wh
+    b_h -= alpha * g_bh
+    w_o -= alpha * g_wo
+    b_o -= alpha * g_bo
+
+print("Model training finished.")
+
+# 5. Plot Accuracy & Loss
+plt.figure(figsize=(12, 4))
+
+# Loss Plot
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Train Loss')
+plt.plot(test_losses, label='Test Loss')
+plt.title('Loss over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+# Accuracy Plot
+plt.subplot(1, 2, 2)
+plt.plot(train_accs, label='Train Accuracy')
+plt.plot(test_accs, label='Test Accuracy')
+plt.title('Accuracy over Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# 6. Evaluation Metrics (Precision, Recall, F1)
+_, final_test_pred = mlp_forward(X_test, w_h, b_h, w_o, b_o)
+test_pred_labels = (final_test_pred > 0.5).astype(int)
+
+TP = np.sum((test_pred_labels == 1) & (y_test == 1))
+FP = np.sum((test_pred_labels == 1) & (y_test == 0))
+FN = np.sum((test_pred_labels == 0) & (y_test == 1))
+
+precision = TP / (TP + FP)
+recall = TP / (TP + FN)
+f1 = 2 * (precision * recall) / (precision + recall)
+
+print("\n--- Model Metrics ---")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# 7. Learning Rates Experiment
+def train_model(h_size, lr, epochs=100):
+    # Re-initialize to ensure fair comparison
+    w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp = create_weights(X_train.shape[1], h_size, 1)
+    v_losses = []
+
+    for i in range(epochs):
+        out_h, out_o = mlp_forward(X_train, w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp)
+        _, test_out = mlp_forward(X_test, w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp)
+        v_losses.append(compute_loss(y_test, test_out))
+
+        g_wh, g_bh, g_wo, g_bo = mlp_backward(X_train, y_train, out_h, out_o, w_o_tmp)
+        w_h_tmp -= lr * g_wh
+        b_h_tmp -= lr * g_bh
+        w_o_tmp -= lr * g_wo
+        b_o_tmp -= lr * g_bo
+
+    return v_losses, w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp
+
+learning_rates = [1.0, 0.5, 0.1, 0.01]
+plt.figure(figsize=(10, 5))
+
+for lr in learning_rates:
+    v_loss, _, _, _, _ = train_model(15, lr)
+    plt.plot(v_loss, label=f"lr = {lr}")
+
+plt.title("Test Loss vs Epochs for Different Learning Rates")
+plt.xlabel("Epochs")
+plt.ylabel("Squared Loss")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 8. Hidden Nodes Analysis (Bar Chart)
+k_values = [5, 10, 15, 20, 25, 30]
+accuracies = []
+
+print("\nTesting different hidden layer sizes...")
+for k in k_values:
+    # Train model (epochs=50 for quick evaluation)
+    _, w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp = train_model(k, lr=0.1, epochs=50)
+
+    # Predict and calculate accuracy
+    _, test_out = mlp_forward(X_test, w_h_tmp, b_h_tmp, w_o_tmp, b_o_tmp)
+    acc = np.mean((test_out > 0.5).astype(int) == y_test)
+    accuracies.append(acc)
+
+# Plotting the Bar Chart
+x_labels = [str(k) for k in k_values]
+plt.figure(figsize=(10, 6))
+
+bars = plt.bar(x_labels, accuracies, color='#1f77b4', edgecolor='black')
+
+plt.title('MLP Performance vs Hidden Layer Size')
+plt.xlabel('Number of Hidden Nodes (k)')
+plt.ylabel('Classification Accuracy')
+plt.ylim(0, 1.1)
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+# Add text values on top of bars
+for bar in bars:
+    yval = bar.get_height()
+    plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, round(yval, 2), ha='center', va='bottom')
+
+plt.show()
